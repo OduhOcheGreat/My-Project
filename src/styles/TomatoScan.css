@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+.ts-app {
+  --ink: #16261A;
+  --canopy: #1B3A2B;
+  --leaf-mid: #4A7A57;
+  --leaf-pale: #EEF3E6;
+  --paper: #F6F5EE;
+  --tomato: #C1440E;
+  --tomato-deep: #8F3009;
+  --line: #DCD8C8;
+  --muted: #6C7A6F;
+  font-family: 'IBM Plex Sans', sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  padding: 32px 20px 64px;
+}
+.ts-app * { box-sizing: border-box; }
+.ts-shell { max-width: 1080px; margin: 0 auto; }
+
+.ts-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
+.ts-brand { display: flex; align-items: center; gap: 10px; }
+.ts-brand-mark { width: 38px; height: 38px; border-radius: 10px; background: var(--canopy); display: flex; align-items: center; justify-content: center; color: var(--leaf-pale); }
+.ts-brand-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
+.ts-brand-tag { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+.ts-badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; background: #FFF; border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 999px; }
+
+.ts-hero { margin-bottom: 32px; }
+.ts-eyebrow { font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tomato); margin-bottom: 10px; }
+.ts-h1 { font-family: 'Fraunces', serif; font-size: clamp(28px, 4vw, 42px); font-weight: 600; line-height: 1.08; max-width: 720px; margin: 0 0 12px; }
+.ts-sub { color: var(--muted); font-size: 15px; max-width: 620px; line-height: 1.6; }
+
+.ts-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+@media (min-width: 860px) { .ts-grid { grid-template-columns: 1.1fr 1fr; align-items: start; } }
+
+.ts-panel { background: #FFFFFF; border: 1px solid var(--line); border-radius: 16px; padding: 22px; }
+.ts-panel-title { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0 0 14px; }
+
+.ts-dropzone {
+  border: 1.5px dashed #B9C4AE; border-radius: 14px; padding: 28px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; cursor: pointer; min-height: 220px; background: var(--leaf-pale);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.ts-dropzone:hover { border-color: var(--leaf-mid); }
+.ts-dropzone-icon { color: var(--leaf-mid); margin-bottom: 10px; }
+.ts-dropzone-text { font-size: 14px; color: var(--ink); font-weight: 500; }
+.ts-dropzone-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.ts-preview-wrap { position: relative; border-radius: 14px; overflow: hidden; background: #0F1A12; min-height: 220px; display: flex; align-items: center; justify-content: center; }
+.ts-preview-img { width: 100%; max-height: 320px; object-fit: contain; display: block; }
+.ts-scanline { position: absolute; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, #7CF29A, transparent); box-shadow: 0 0 16px 2px rgba(124,242,154,0.7); }
+
+.ts-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.ts-btn { font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; border-radius: 10px; padding: 10px 16px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: transform 120ms ease, opacity 120ms ease; }
+.ts-btn:active { transform: scale(0.98); }
+.ts-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.ts-btn-primary { background: var(--canopy); color: #EFF6ED; }
+.ts-btn-ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.ts-error { color: var(--tomato-deep); font-size: 13px; margin-top: 10px; }
+
+.ts-result-empty { color: var(--muted); font-size: 14px; line-height: 1.6; padding: 30px 6px; text-align: center; }
+.ts-result-top { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.ts-gauge { width: 180px; height: 100px; flex-shrink: 0; }
+.ts-gauge-number { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 500; fill: var(--ink); }
+.ts-result-name { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+.ts-result-tag { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+
+.ts-advice { margin-top: 16px; padding: 14px 16px; background: var(--leaf-pale); border-radius: 12px; font-size: 13.5px; line-height: 1.55; display: flex; gap: 10px; }
+
+.ts-bars { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.ts-bar-row { display: grid; grid-template-columns: 130px 1fr 52px; align-items: center; gap: 10px; }
+.ts-bar-label { font-size: 12.5px; color: var(--ink); }
+.ts-bar-track { height: 8px; background: #EEEBDD; border-radius: 999px; overflow: hidden; }
+.ts-bar-fill { height: 100%; border-radius: 999px; transition: width 700ms ease; }
+.ts-bar-pct { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); text-align: right; }
+
+.ts-section-title { font-family: 'Fraunces', serif; font-size: 20px; font-weight: 600; margin: 40px 0 14px; }
+
+.ts-classgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ts-classchip { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #FFF; display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.ts-swatch { width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0; }
+
+.ts-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (min-width: 640px) { .ts-metrics { grid-template-columns: repeat(4, 1fr); } }
+.ts-metric { background: var(--canopy); color: #EFF6ED; border-radius: 12px; padding: 16px; }
+.ts-metric-value { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 500; }
+.ts-metric-label { font-size: 11.5px; color: #BFD3C4; margin-top: 4px; }
+.ts-metrics-note { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+
+.ts-history { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.ts-history-item { flex-shrink: 0; width: 108px; }
+.ts-history-thumb { width: 108px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+.ts-history-label { font-size: 11px; margin-top: 6px; line-height: 1.3; }
+.ts-history-empty { color: var(--muted); font-size: 13px; }
+
+.ts-footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.6; }
