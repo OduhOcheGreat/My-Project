@@ -64,9 +64,25 @@ export default function TomatoLeafDiseaseDetector() {
   const imgRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Fetch initial system status & load past scans from Firestore
+  // Fetch initial system status & load past scans from Firestore / localStorage
   useEffect(() => {
     async function initSystem() {
+      // 0. Check localStorage for active session so photos persist across page refresh
+      try {
+        const cached = localStorage.getItem("tomatoscan_active_session");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.imageSrc) {
+            setImageSrc(parsed.imageSrc);
+            setFileName(parsed.fileName || "Restored leaf photo");
+            setResult(parsed.result || null);
+            setBackendMeta(parsed.backendMeta || null);
+          }
+        }
+      } catch (cacheErr) {
+        console.warn("Failed to load local cached session:", cacheErr);
+      }
+
       // 1. Check Backend API status
       try {
         const res = await fetch("/api/model/status");
@@ -94,23 +110,40 @@ export default function TomatoLeafDiseaseDetector() {
           ...docSnap.data(),
         }));
         if (docs.length > 0) {
-          setHistory(
-            docs.map((d) => ({
-              id: d.id,
-              name: d.fileName,
-              thumb: d.imageUrl,
-              top1: {
-                label: d.topPrediction,
-                confidence: d.confidence || 90,
-                advice: d.advice || "",
-                swatch:
-                  CLASSES.find((c) => c.label === d.topPrediction)?.swatch ||
-                  "#3E7C4A",
-              },
-              backendMessage: d.backendMessage,
-              imageUrl: d.imageUrl,
-            }))
-          );
+          const formatted = docs.map((d) => ({
+            id: d.id,
+            name: d.fileName,
+            thumb: d.imageUrl,
+            top1: {
+              label: d.topPrediction,
+              confidence: d.confidence || 90,
+              advice: d.advice || "",
+              swatch:
+                CLASSES.find((c) => c.label === d.topPrediction)?.swatch ||
+                "#3E7C4A",
+            },
+            backendMessage: d.backendMessage,
+            imageUrl: d.imageUrl,
+          }));
+
+          setHistory(formatted);
+
+          // If no active session cached, restore latest scan from Firestore automatically
+          const cached = localStorage.getItem("tomatoscan_active_session");
+          if (!cached && formatted[0]) {
+            const latest = formatted[0];
+            setImageSrc(latest.imageUrl || latest.thumb);
+            setFileName(latest.name);
+            setResult([latest.top1]);
+            setBackendMeta({
+              cdnUrl: latest.imageUrl,
+              backendMessage:
+                latest.backendMessage ||
+                "Restored previous scan from Cloud Firestore.",
+              databaseId: latest.id,
+              timestamp: "Restored from Database",
+            });
+          }
         }
       } catch (err) {
         // Fallback: load from backend in-memory registry
@@ -216,7 +249,11 @@ export default function TomatoLeafDiseaseDetector() {
             uploadPayload = await uploadRes.json();
             if (uploadPayload?.url) {
               uploadedCdnUrl = uploadPayload.url;
+              setImageSrc(uploadPayload.url);
             }
+          } else {
+            const errData = await uploadRes.json().catch(() => ({}));
+            console.warn("UploadThing notice:", errData);
           }
         } catch (uploadErr) {
           console.warn("UploadThing upload notice:", uploadErr);
@@ -271,7 +308,7 @@ export default function TomatoLeafDiseaseDetector() {
       // Finalize scan state
       setScanProgress(100);
       setResult(top3);
-      setBackendMeta({
+      const meta = {
         cdnUrl: uploadedCdnUrl,
         uploadDetails: uploadPayload,
         backendMessage,
@@ -282,7 +319,23 @@ export default function TomatoLeafDiseaseDetector() {
         },
         databaseId: persistedId,
         timestamp: new Date().toLocaleTimeString(),
-      });
+      };
+      setBackendMeta(meta);
+
+      // Persist to localStorage so the photo & diagnosis NEVER vanish on refresh
+      try {
+        localStorage.setItem(
+          "tomatoscan_active_session",
+          JSON.stringify({
+            imageSrc: uploadedCdnUrl,
+            fileName: fileName || "tomato_leaf.jpg",
+            result: top3,
+            backendMeta: meta,
+          })
+        );
+      } catch (cacheErr) {
+        console.warn("Failed to cache active session to localStorage:", cacheErr);
+      }
 
       // Update recent history
       setHistory((prev) => [
@@ -309,6 +362,9 @@ export default function TomatoLeafDiseaseDetector() {
   };
 
   const reset = () => {
+    try {
+      localStorage.removeItem("tomatoscan_active_session");
+    } catch {}
     setImageSrc(null);
     setFileObject(null);
     setFileName("");
@@ -320,17 +376,43 @@ export default function TomatoLeafDiseaseDetector() {
   };
 
   const loadPastScan = (item) => {
-    setImageSrc(item.thumb || item.imageUrl);
-    setFileName(item.name || "Archived scan");
-    setResult([item.top1]);
-    setBackendMeta({
+    const matchedClass =
+      CLASSES.find((c) => c.label === item.top1?.label) || {};
+    const restoredResult = [
+      {
+        ...matchedClass,
+        label: item.top1?.label,
+        confidence: item.top1?.confidence || 90,
+        advice: item.top1?.advice || "",
+        swatch: item.top1?.swatch || "#3E7C4A",
+      },
+    ];
+    const restoredMeta = {
       cdnUrl: item.imageUrl || item.thumb,
       backendMessage:
         item.backendMessage ||
         "Archived scan retrieved from Cloud Firestore database.",
       databaseId: item.id,
       timestamp: "Saved scan",
-    });
+    };
+
+    const targetSrc = item.thumb || item.imageUrl;
+    setImageSrc(targetSrc);
+    setFileName(item.name || "Archived scan");
+    setResult(restoredResult);
+    setBackendMeta(restoredMeta);
+
+    try {
+      localStorage.setItem(
+        "tomatoscan_active_session",
+        JSON.stringify({
+          imageSrc: targetSrc,
+          fileName: item.name || "Archived scan",
+          result: restoredResult,
+          backendMeta: restoredMeta,
+        })
+      );
+    } catch {}
   };
 
   return (

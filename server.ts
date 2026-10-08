@@ -19,11 +19,20 @@ const isProd = process.env.NODE_ENV === "production";
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
-// Configure UploadThing UTApi
-const uploadThingToken =
-  process.env.UPLOADTHING_TOKEN ||
-  "eyJhcGlLZXkiOiJza19saXZlX2RjYjg1OGY1OTUyOWJlNTMzNTI1Y2VkYzRiMzcxMjNjZWZhZWJkNjA1YjQ4YjBmYjI0NmE5ZWRmNmMxMTcxYzYiLCJhcHBJZCI6ImdocHQyeGlmNnkiLCJyZWdpb25zIjpbInNlYTEiXX0=";
+// Sanitize UploadThing token (strip potential redundant env prefixes or quotes)
+function sanitizeToken(raw?: string): string {
+  const fallback =
+    "eyJhcGlLZXkiOiJza19saXZlX2RjYjg1OGY1OTUyOWJlNTMzNTI1Y2VkYzRiMzcxMjNjZWZhZWJkNjA1YjQ4YjBmYjI0NmE5ZWRmNmMxMTcxYzYiLCJhcHBJZCI6ImdocHQyeGlmNnkiLCJyZWdpb25zIjpbInNlYTEiXX0=";
+  if (!raw) return fallback;
+  let token = raw.trim();
+  if (token.includes("UPLOADTHING_TOKEN=")) {
+    token = token.replace(/UPLOADTHING_TOKEN\s*=\s*/g, "");
+  }
+  token = token.replace(/^['"]+|['"]+$/g, "").trim();
+  return token.length > 20 ? token : fallback;
+}
 
+const uploadThingToken = sanitizeToken(process.env.UPLOADTHING_TOKEN);
 const utapi = new UTApi({ token: uploadThingToken });
 
 // Configure Multer for in-memory file uploads
