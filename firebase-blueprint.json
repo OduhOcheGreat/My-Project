@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "Scan": {
+      "title": "Scan",
+      "description": "Tomato leaf disease diagnostic scan record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the scan"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Original image file name",
+          "maxLength": 200
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "UploadThing CDN hosted image URL",
+          "maxLength": 1000
+        },
+        "topPrediction": {
+          "type": "string",
+          "description": "Primary disease classification label",
+          "maxLength": 100
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confidence percentage score"
+        },
+        "advice": {
+          "type": "string",
+          "description": "Agronomic advice or action recommended",
+          "maxLength": 500
+        },
+        "backendMessage": {
+          "type": "string",
+          "description": "Message from the backend inference engine",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp string when scan was saved",
+          "maxLength": 50
+        }
+      },
+      "required": [
+        "fileName",
+        "imageUrl",
+        "topPrediction",
+        "confidence",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/scans/{scanId}": {
+      "schema": "Scan",
+      "description": "Scanned tomato leaf records with diagnostic outcomes"
+    }
+  }
+}

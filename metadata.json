@@ -1,0 +1,7 @@
+{
+  "name": "TomatoScan — Leaf Disease Detector",
+  "description": "Prototype diagnostic interface for early detection of tomato leaf diseases using CNN-based image classification.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
