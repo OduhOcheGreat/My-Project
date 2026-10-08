@@ -19,12 +19,57 @@
 .ts-app * { box-sizing: border-box; }
 .ts-shell { max-width: 1080px; margin: 0 auto; }
 
-.ts-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
+.ts-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
 .ts-brand { display: flex; align-items: center; gap: 10px; }
 .ts-brand-mark { width: 38px; height: 38px; border-radius: 10px; background: var(--canopy); display: flex; align-items: center; justify-content: center; color: var(--leaf-pale); }
 .ts-brand-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
 .ts-brand-tag { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
 .ts-badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; background: #FFF; border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 999px; }
+
+/* System Status Bar */
+.ts-system-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #FFFFFF;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin-bottom: 24px;
+  font-size: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  flex-wrap: wrap;
+}
+.ts-system-label {
+  color: var(--muted);
+  font-weight: 500;
+  margin-right: 4px;
+}
+.ts-system-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.ts-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3E7C4A;
+  box-shadow: 0 0 6px rgba(62, 124, 74, 0.6);
+  display: inline-block;
+}
+.ts-status-dot.pulse {
+  animation: dotPulse 1.4s infinite ease-in-out;
+}
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
 
 .ts-hero { margin-bottom: 32px; }
 .ts-eyebrow { font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tomato); margin-bottom: 10px; }
@@ -48,9 +93,200 @@
 .ts-dropzone-text { font-size: 14px; color: var(--ink); font-weight: 500; }
 .ts-dropzone-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
-.ts-preview-wrap { position: relative; border-radius: 14px; overflow: hidden; background: #0F1A12; min-height: 220px; display: flex; align-items: center; justify-content: center; }
-.ts-preview-img { width: 100%; max-height: 320px; object-fit: contain; display: block; }
-.ts-scanline { position: absolute; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, #7CF29A, transparent); box-shadow: 0 0 16px 2px rgba(124,242,154,0.7); }
+.ts-preview-wrap { position: relative; border-radius: 14px; overflow: hidden; background: #0F1A12; min-height: 240px; display: flex; align-items: center; justify-content: center; }
+.ts-preview-img { width: 100%; max-height: 340px; object-fit: contain; display: block; }
+.ts-scan-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(124, 242, 154, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 242, 154, 0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+}
+.ts-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, #7CF29A 50%, transparent);
+  box-shadow: 0 0 18px 4px rgba(124, 242, 154, 0.85);
+  pointer-events: none;
+  z-index: 2;
+}
+.ts-scan-target {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: #7CF29A;
+  background: rgba(15, 26, 18, 0.85);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(124, 242, 154, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 3;
+}
+
+/* Diagnosis Scanner Loader */
+.ts-diagnosis-loader {
+  position: relative;
+  background: #0D1811;
+  color: #EFF6ED;
+  border-radius: 14px;
+  padding: 26px 20px;
+  overflow: hidden;
+  border: 1px solid rgba(124, 242, 154, 0.25);
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.ts-diagnosis-laser {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, #7CF29A 20%, #44E070 50%, #7CF29A 80%, transparent);
+  box-shadow: 0 0 24px 6px rgba(124, 242, 154, 0.9);
+  animation: laserSweep 2s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+@keyframes laserSweep {
+  0% { top: 0%; opacity: 0.85; }
+  100% { top: 96%; opacity: 1; }
+}
+
+.ts-diag-loader-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  z-index: 1;
+}
+.ts-diag-loader-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Fraunces', serif;
+  font-size: 16px;
+  color: #7CF29A;
+}
+.ts-diag-loader-pct {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #7CF29A;
+  background: rgba(124, 242, 154, 0.12);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.ts-diag-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1;
+}
+.ts-diag-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #A3B8AA;
+}
+.ts-diag-step.active {
+  color: #EFF6ED;
+  font-weight: 500;
+}
+.ts-diag-step.done {
+  color: #7CF29A;
+}
+.ts-step-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ts-diag-progress-bar {
+  margin-top: 18px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+  z-index: 1;
+}
+.ts-diag-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4A7A57, #7CF29A);
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+
+/* Backend Response Card */
+.ts-backend-card {
+  margin-top: 20px;
+  background: #F7FAF6;
+  border: 1px solid #C4D9C7;
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+}
+.ts-backend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ts-backend-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--canopy);
+  color: #EFF6ED;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 6px;
+}
+.ts-backend-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1F3624;
+  margin-bottom: 12px;
+}
+.ts-backend-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  border-top: 1px solid #D6E3D8;
+  padding-top: 10px;
+}
+.ts-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ts-cdn-link {
+  color: var(--tomato);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  word-break: break-all;
+}
+.ts-cdn-link:hover {
+  color: var(--tomato-deep);
+}
 
 .ts-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .ts-btn { font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; border-radius: 10px; padding: 10px 16px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: transform 120ms ease, opacity 120ms ease; }

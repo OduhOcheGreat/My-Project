@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection verification endpoint
+    match /test/{testId} {
+      allow read: if true;
+    }
+
+    function isValidScan(data) {
+      return data.keys().hasAll(['fileName', 'imageUrl', 'topPrediction', 'confidence', 'createdAt']) &&
+        data.fileName is string && data.fileName.size() <= 200 &&
+        data.imageUrl is string && data.imageUrl.size() <= 1000 &&
+        data.topPrediction is string && data.topPrediction.size() <= 100 &&
+        data.confidence is number &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    match /scans/{scanId} {
+      allow read: if true;
+      allow create: if isValidScan(request.resource.data);
+      allow update, delete: if false;
+    }
+  }
+}
