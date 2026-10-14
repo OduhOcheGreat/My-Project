@@ -332,3 +332,107 @@
 .ts-history-empty { color: var(--muted); font-size: 13px; }
 
 .ts-footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+/* Model Setup Modal */
+.ts-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 26, 18, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.ts-modal-box {
+  background: #FFFFFF;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  padding: 28px;
+  position: relative;
+}
+.ts-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+}
+.ts-modal-title {
+  font-family: 'Fraunces', serif;
+  font-size: 19px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--canopy);
+}
+.ts-modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+}
+.ts-modal-status {
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.ts-modal-status.active {
+  background: #EEF7EF;
+  border: 1px solid #B8E0BE;
+  color: #1F6B2E;
+}
+.ts-modal-status.waiting {
+  background: #FFF8E6;
+  border: 1px solid #FFE08A;
+  color: #8F6000;
+}
+.ts-modal-section {
+  margin-bottom: 20px;
+}
+.ts-modal-section-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--ink);
+}
+.ts-upload-drop {
+  border: 2px dashed #B9C4AE;
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--leaf-pale);
+  transition: all 160ms ease;
+}
+.ts-upload-drop:hover {
+  border-color: var(--canopy);
+  background: #E5EFE0;
+}
+.ts-input-row {
+  display: flex;
+  gap: 8px;
+}
+.ts-input-text {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-family: 'IBM Plex Mono', monospace;
+}
