@@ -284,6 +284,17 @@ app.post("/api/model/labels", (req: Request, res: Response) => {
   return res.status(400).json({ error: "Labels must be an array of strings." });
 });
 
+// Helper to format model labels into human-friendly strings
+function formatLabelName(raw: string): string {
+  if (!raw) return "Unknown";
+  let name = raw.replace(/_/g, " ").trim();
+  if (name.toLowerCase() === "healthy") return "Healthy";
+  if (name.toLowerCase() === "powdery mildew") return "Powdery Mildew";
+  if (name.toLowerCase() === "tomato mosaic virus") return "Tomato Mosaic Virus";
+  if (name.toLowerCase().includes("spider mites")) return "Spider Mites";
+  return name.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
+
 // Advice lookup dictionary by label
 const ADVICE_LOOKUP: Record<string, string> = {
   "Healthy": "No signs of infection detected. Keep monitoring weekly and maintain current watering and spacing practices.",
@@ -295,6 +306,8 @@ const ADVICE_LOOKUP: Record<string, string> = {
   "Leaf Mold": "Lower humidity around the canopy with wider plant spacing and proper ventilation. Apply protectant fungicide.",
   "Spider Mites": "Rinse the underside of foliage with strong water spray and introduce predatory mites or insecticidal soap.",
   "Target Spot": "Remove concentric-ringed leaves promptly, avoid dense planting, and apply broad-spectrum fungicide.",
+  "Tomato Mosaic Virus": "Disinfect hands and pruning shears with a milk or bleach solution. Destroy infected plants immediately to prevent sap transmission.",
+  "Powdery Mildew": "Apply sulfur-based or biofungicide sprays at first appearance of white fungal powder. Ensure ample sunlight and adequate air circulation.",
 };
 
 const SWATCH_LOOKUP: Record<string, string> = {
@@ -307,6 +320,8 @@ const SWATCH_LOOKUP: Record<string, string> = {
   "Leaf Mold": "#C9A227",
   "Spider Mites": "#9C7A3C",
   "Target Spot": "#7A4A2A",
+  "Tomato Mosaic Virus": "#8B263E",
+  "Powdery Mildew": "#BFB88A",
 };
 
 // API Route: Diagnose endpoint (executes live ONNX model if loaded, or fallback stub)
@@ -341,13 +356,17 @@ app.post("/api/diagnose", async (req: Request, res: Response) => {
 
         // Map to labels
         const ranked = probs
-          .map((prob, idx) => ({
-            id: (modelLabels[idx] || `Class_${idx}`).toLowerCase().replace(/\s+/g, "_"),
-            label: modelLabels[idx] || `Class ${idx}`,
-            confidence: Number((prob * 100).toFixed(1)),
-            advice: ADVICE_LOOKUP[modelLabels[idx]] || "Monitor crop foliage regularly.",
-            swatch: SWATCH_LOOKUP[modelLabels[idx]] || "#4A7A57",
-          }))
+          .map((prob, idx) => {
+            const rawLabel = modelLabels[idx] || `Class_${idx}`;
+            const formattedLabel = formatLabelName(rawLabel);
+            return {
+              id: rawLabel.toLowerCase().replace(/\s+/g, "_"),
+              label: formattedLabel,
+              confidence: Number((prob * 100).toFixed(1)),
+              advice: ADVICE_LOOKUP[formattedLabel] || ADVICE_LOOKUP[rawLabel] || "Monitor crop foliage regularly.",
+              swatch: SWATCH_LOOKUP[formattedLabel] || SWATCH_LOOKUP[rawLabel] || "#4A7A57",
+            };
+          })
           .sort((a, b) => b.confidence - a.confidence);
 
         finalPredictions = ranked.slice(0, 3);
