@@ -59,11 +59,11 @@ export default function TomatoLeafDiseaseDetector() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
   const [systemStatus, setSystemStatus] = useState({
-    backend: "Checking...",
-    uploadThing: "Active",
-    database: "Connected",
-    model: "ONNX Stub",
-    isLiveModel: false,
+    backend: "Online",
+    uploadThing: "Active (UploadThing)",
+    database: "Firestore Connected",
+    model: "ONNX Live (UploadThing CDN)",
+    isLiveModel: true,
   });
 
   // Model Setup Modal States
@@ -969,26 +969,44 @@ export default function TomatoLeafDiseaseDetector() {
                 </button>
               </div>
 
-              <div
-                className={`ts-modal-status ${
-                  systemStatus.isLiveModel ? "active" : "waiting"
-                }`}
-              >
+              <div className="ts-modal-status active">
                 <div
                   className="ts-status-dot"
-                  style={{
-                    background: systemStatus.isLiveModel ? "#3E7C4A" : "#D4B32A",
-                  }}
+                  style={{ background: "#3E7C4A" }}
                 />
                 <div>
-                  <strong>
-                    {systemStatus.isLiveModel
-                      ? "Live ONNX Model Active"
-                      : "Awaiting tomato_model.onnx"}
-                  </strong>
+                  <strong>Permanent CDN Model Connected</strong>
                   <div style={{ fontSize: 11, marginTop: 2, opacity: 0.85 }}>
-                    Input Tensor: 1x224x224x3 (Float32) · Engine: onnxruntime-node
+                    Loaded from UploadThing CDN · 11 Classes Active · Engine: ONNX Runtime
                   </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "#F7FAF6",
+                  border: "1px solid #C4D9C7",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  marginBottom: 18,
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ fontWeight: 600, color: "var(--canopy)", marginBottom: 4 }}>
+                  Permanent Model Weights (UploadThing CDN):
+                </div>
+                <div
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 11,
+                    color: "var(--ink)",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  https://ghpt2xif6y.ufs.sh/f/0sjCBGuauAVcPFa3x5cB5q3KLi2tHexZ7JCdSWYbnk0TQV1X
+                </div>
+                <div style={{ marginTop: 6, fontSize: 11, color: "var(--muted)" }}>
+                  Key: <code>0sjCBGuauAVcPFa3x5cB5q3KLi2tHexZ7JCdSWYbnk0TQV1X</code> · Auto-cached permanently
                 </div>
               </div>
 

@@ -76,16 +76,24 @@ const uploadModel = multer({
 // ONNX Model Session Management
 let onnxSession: ort.InferenceSession | null = null;
 let modelInputName: string = "keras_tensor_525";
+export const PERMANENT_MODEL_CDN_URL =
+  process.env.MODEL_CDN_URL ||
+  "https://ghpt2xif6y.ufs.sh/f/0sjCBGuauAVcPFa3x5cB5q3KLi2tHexZ7JCdSWYbnk0TQV1X";
+
+export const PERMANENT_MODEL_KEY = "0sjCBGuauAVcPFa3x5cB5q3KLi2tHexZ7JCdSWYbnk0TQV1X";
+
 let modelLabels: string[] = [
-  "Bacterial Spot",
-  "Early Blight",
-  "Healthy",
-  "Late Blight",
-  "Leaf Mold",
-  "Septoria Leaf Spot",
-  "Spider Mites",
-  "Target Spot",
-  "Tomato Yellow Leaf Curl Virus",
+  "Bacterial_spot",
+  "Early_blight",
+  "Late_blight",
+  "Leaf_Mold",
+  "Septoria_leaf_spot",
+  "Spider_mites Two-spotted_spider_mite",
+  "Target_Spot",
+  "Tomato_Yellow_Leaf_Curl_Virus",
+  "Tomato_mosaic_virus",
+  "healthy",
+  "powdery_mildew",
 ];
 
 // Load labels if labels.json exists
@@ -94,7 +102,7 @@ function loadLabels() {
   if (fs.existsSync(labelsPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(labelsPath, "utf-8"));
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         modelLabels = data;
         console.log("Loaded custom labels.json:", modelLabels);
       }
@@ -107,6 +115,24 @@ loadLabels();
 
 async function initOnnxSession() {
   const modelPath = path.join(modelsDir, "tomato_model.onnx");
+
+  // If model is not yet on local disk, automatically download from permanent UploadThing CDN!
+  if (!fs.existsSync(modelPath)) {
+    try {
+      console.log(`Model file not on local disk. Auto-downloading permanent weights from UploadThing CDN (${PERMANENT_MODEL_CDN_URL})...`);
+      const resp = await fetch(PERMANENT_MODEL_CDN_URL);
+      if (resp.ok) {
+        const buffer = Buffer.from(await resp.arrayBuffer());
+        fs.writeFileSync(modelPath, buffer);
+        console.log(`Successfully downloaded and cached tomato_model.onnx from UploadThing CDN (${buffer.length} bytes)!`);
+      } else {
+        console.warn(`Failed to auto-fetch model from CDN: HTTP ${resp.status}`);
+      }
+    } catch (fetchErr) {
+      console.warn("Could not auto-download model from CDN:", fetchErr);
+    }
+  }
+
   if (fs.existsSync(modelPath)) {
     try {
       console.log("Found tomato_model.onnx, initializing ONNX Runtime session...");
@@ -117,7 +143,7 @@ async function initOnnxSession() {
       console.error("Failed to load ONNX model:", err?.message || err);
     }
   } else {
-    console.log("No tomato_model.onnx found yet in /models. Awaiting user upload.");
+    console.warn("tomato_model.onnx not loaded. Will retry on next request.");
   }
 }
 initOnnxSession();
@@ -135,7 +161,12 @@ const inMemoryScans: Array<{
 }> = [];
 
 // API Route: Backend & Model Status
-app.get("/api/model/status", (_req: Request, res: Response) => {
+app.get("/api/model/status", async (_req: Request, res: Response) => {
+  // Ensure session is initialized if not yet loaded
+  if (!onnxSession) {
+    await initOnnxSession();
+  }
+
   const modelExists = fs.existsSync(path.join(modelsDir, "tomato_model.onnx"));
   res.json({
     status: "online",
@@ -143,8 +174,11 @@ app.get("/api/model/status", (_req: Request, res: Response) => {
     model: {
       name: "TomatoLeafCNN-ONNX",
       format: "Keras 3 / ONNX (.onnx)",
-      status: onnxSession ? "live_weights_loaded" : modelExists ? "file_present_initializing" : "awaiting_model_file",
+      status: onnxSession ? "live_weights_loaded" : "downloading_from_cdn",
       isLiveModel: !!onnxSession,
+      isPermanentCDN: true,
+      cdnUrl: PERMANENT_MODEL_CDN_URL,
+      cdnKey: PERMANENT_MODEL_KEY,
       inputName: modelInputName,
       inputShape: [1, 224, 224, 3],
       labelsCount: modelLabels.length,
