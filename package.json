@@ -16,6 +16,7 @@
     "lucide-react": "^0.383.0",
     "multer": "^2.4.0",
     "onnxruntime-node": "^1.30.0",
+    "onnxruntime-web": "^1.30.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "uploadthing": "^7.7.4"

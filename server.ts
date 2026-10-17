@@ -1,5 +1,4 @@
 import express, { Request, Response } from "express";
-import { createServer as createViteServer } from "vite";
 import multer from "multer";
 import dotenv from "dotenv";
 import path from "path";
@@ -461,6 +460,7 @@ app.get("/api/scans", (_req: Request, res: Response) => {
 // Start server with Vite middleware in development or static serving in production
 async function startServer() {
   if (!isProd) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

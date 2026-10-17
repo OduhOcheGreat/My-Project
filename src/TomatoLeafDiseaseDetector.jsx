@@ -24,6 +24,7 @@ import {
   FileUp,
   Link2,
 } from "lucide-react";
+import * as ortWeb from "onnxruntime-web";
 
 import { CLASSES } from "./data/classes";
 import { analyzeHeuristically } from "./utils/analyze";
@@ -39,11 +40,97 @@ import {
 import { handleFirestoreError, OperationType } from "./utils/firestoreErrors";
 import "./styles/TomatoScan.css";
 
+// Configure WebAssembly path to CDN for reliable execution across all hosts (Vercel, AI Studio, Mobile)
+if (typeof window !== "undefined" && ortWeb?.env?.wasm) {
+  ortWeb.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/";
+}
+
+export const PERMANENT_MODEL_CDN_URL =
+  "https://ghpt2xif6y.ufs.sh/f/0sjCBGuauAVcPFa3x5cB5q3KLi2tHexZ7JCdSWYbnk0TQV1X";
+
+const MODEL_LABELS = [
+  "Bacterial_spot",
+  "Early_blight",
+  "Late_blight",
+  "Leaf_Mold",
+  "Septoria_leaf_spot",
+  "Spider_mites Two-spotted_spider_mite",
+  "Target_Spot",
+  "Tomato_Yellow_Leaf_Curl_Virus",
+  "Tomato_mosaic_virus",
+  "healthy",
+  "powdery_mildew",
+];
+
+function formatLabelName(raw) {
+  if (!raw) return "Unknown";
+  let name = raw.replace(/_/g, " ").trim();
+  if (name.toLowerCase() === "healthy") return "Healthy";
+  if (name.toLowerCase() === "powdery mildew") return "Powdery Mildew";
+  if (name.toLowerCase() === "tomato mosaic virus") return "Tomato Mosaic Virus";
+  if (name.toLowerCase().includes("spider mites")) return "Spider Mites";
+  return name.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
+
+const ADVICE_LOOKUP = {
+  "Healthy": "No signs of infection detected. Keep monitoring weekly and maintain current watering and spacing practices.",
+  "Early Blight": "Remove and destroy affected lower leaves. Apply a copper-based or chlorothalonil fungicide and improve air circulation.",
+  "Late Blight": "Act fast — late blight spreads rapidly in humid conditions. Isolate affected plants and apply systemic fungicide.",
+  "Septoria Leaf Spot": "Prune infected foliage close to soil line, mulch to prevent soil splash, and rotate fungicide classes.",
+  "Tomato Yellow Leaf Curl Virus": "Control the whitefly vector using insecticidal soap or sticky traps. Remove severely stunted plants.",
+  "Bacterial Spot": "Switch to copper-based bactericide sprays, avoid working with wet foliage, and sterilize tools between plants.",
+  "Leaf Mold": "Lower humidity around the canopy with wider plant spacing and proper ventilation. Apply protectant fungicide.",
+  "Spider Mites": "Rinse the underside of foliage with strong water spray and introduce predatory mites or insecticidal soap.",
+  "Target Spot": "Remove concentric-ringed leaves promptly, avoid dense planting, and apply broad-spectrum fungicide.",
+  "Tomato Mosaic Virus": "Disinfect hands and pruning shears with a milk or bleach solution. Destroy infected plants immediately to prevent sap transmission.",
+  "Powdery Mildew": "Apply sulfur-based or biofungicide sprays at first appearance of white fungal powder. Ensure ample sunlight and adequate air circulation.",
+};
+
+const SWATCH_LOOKUP = {
+  "Healthy": "#3E7C4A",
+  "Early Blight": "#A8631B",
+  "Late Blight": "#3B2A2A",
+  "Septoria Leaf Spot": "#8C8C7A",
+  "Tomato Yellow Leaf Curl Virus": "#D4B32A",
+  "Bacterial Spot": "#B24A34",
+  "Leaf Mold": "#C9A227",
+  "Spider Mites": "#9C7A3C",
+  "Target Spot": "#7A4A2A",
+  "Tomato Mosaic Virus": "#8B263E",
+  "Powdery Mildew": "#BFB88A",
+};
+
+let clientSessionInstance = null;
+let clientSessionPromise = null;
+
+async function getClientOnnxSession() {
+  if (clientSessionInstance) return clientSessionInstance;
+  if (clientSessionPromise) return clientSessionPromise;
+
+  clientSessionPromise = (async () => {
+    try {
+      console.log("Pre-loading client-side ONNX session from UploadThing CDN...");
+      const session = await ortWeb.InferenceSession.create(
+        PERMANENT_MODEL_CDN_URL,
+        { executionProviders: ["wasm"] }
+      );
+      clientSessionInstance = session;
+      console.log("Client-side ONNX session ready! Inputs:", session.inputNames);
+      return session;
+    } catch (err) {
+      console.warn("Could not load client-side ONNX session:", err);
+      return null;
+    }
+  })();
+
+  return clientSessionPromise;
+}
+
 const SCAN_STAGES = [
   { id: 1, label: "Dispatching image payload to UploadThing CDN..." },
   { id: 2, label: "Upload verified · File hosted on high-speed CDN" },
-  { id: 3, label: "Extracting 224x224 RGB tensor & dispatching to ONNX pipeline..." },
-  { id: 4, label: "Executing CNN feed-forward pass (ONNX Runtime engine)..." },
+  { id: 3, label: "Extracting 224x224 RGB tensor & running ONNX model pass..." },
+  { id: 4, label: "Evaluating 11-class Solanaceae neural network probabilities..." },
   { id: 5, label: "Syncing diagnostic outcome to Cloud Firestore database..." },
 ];
 
@@ -329,6 +416,7 @@ export default function TomatoLeafDiseaseDetector() {
 
       // 2. Extract 224x224 RGB raw tensor pixel array (shape 1,224,224,3) for ONNX model
       let pixelArray = null;
+      let float32Array = null;
       if (imgRef.current) {
         try {
           const tensorCanvas = document.createElement("canvas");
@@ -337,8 +425,13 @@ export default function TomatoLeafDiseaseDetector() {
           const tCtx = tensorCanvas.getContext("2d");
           tCtx.drawImage(imgRef.current, 0, 0, 224, 224);
           const imgData = tCtx.getImageData(0, 0, 224, 224).data;
+          float32Array = new Float32Array(224 * 224 * 3);
           const rawFloats = [];
+          let pIdx = 0;
           for (let i = 0; i < imgData.length; i += 4) {
+            float32Array[pIdx++] = imgData[i];     // R (0-255)
+            float32Array[pIdx++] = imgData[i + 1]; // G (0-255)
+            float32Array[pIdx++] = imgData[i + 2]; // B (0-255)
             rawFloats.push(imgData[i], imgData[i + 1], imgData[i + 2]);
           }
           pixelArray = rawFloats;
@@ -350,7 +443,48 @@ export default function TomatoLeafDiseaseDetector() {
       // 3. Client CNN color-spatial analysis (fallback baseline)
       const clientTop3 = analyzeHeuristically(imgRef.current);
 
-      // 4. Dispatch to backend ONNX inference pipeline
+      // 4. Run Client-Side ONNX Engine (Executes native weights via WebAssembly right inside the browser!)
+      let liveOnnxPredictions = null;
+      let onnxEngineMsg = "";
+      if (float32Array) {
+        try {
+          const sess = await getClientOnnxSession();
+          if (sess) {
+            const inKey = sess.inputNames[0] || "keras_tensor_525";
+            const tensor = new ortWeb.Tensor("float32", float32Array, [1, 224, 224, 3]);
+            const results = await sess.run({ [inKey]: tensor });
+            const outKey = sess.outputNames[0];
+            const rawScores = Array.from(results[outKey].data);
+
+            // Compute Softmax
+            const maxVal = Math.max(...rawScores);
+            const expScores = rawScores.map((v) => Math.exp(v - maxVal));
+            const sumExp = expScores.reduce((a, b) => a + b, 0);
+            const probs = expScores.map((v) => v / sumExp);
+
+            const ranked = probs
+              .map((prob, idx) => {
+                const rawLabel = MODEL_LABELS[idx] || `Class_${idx}`;
+                const formattedLabel = formatLabelName(rawLabel);
+                return {
+                  id: rawLabel.toLowerCase().replace(/\s+/g, "_"),
+                  label: formattedLabel,
+                  confidence: Number((prob * 100).toFixed(1)),
+                  advice: ADVICE_LOOKUP[formattedLabel] || ADVICE_LOOKUP[rawLabel] || "Monitor crop foliage regularly.",
+                  swatch: SWATCH_LOOKUP[formattedLabel] || SWATCH_LOOKUP[rawLabel] || "#4A7A57",
+                };
+              })
+              .sort((a, b) => b.confidence - a.confidence);
+
+            liveOnnxPredictions = ranked.slice(0, 3);
+            onnxEngineMsg = `LIVE ONNX MODEL: Evaluated leaf tensor via 'tomato_model.onnx' (WASM Engine). Primary diagnosis: ${liveOnnxPredictions[0].label} (${liveOnnxPredictions[0].confidence.toFixed(1)}% confidence).`;
+          }
+        } catch (clientOnnxErr) {
+          console.warn("Client ONNX runtime execution notice:", clientOnnxErr);
+        }
+      }
+
+      // 5. Dispatch to backend ONNX inference pipeline (for backend telemetry and storage)
       let backendResponseData = null;
       try {
         const diagnoseRes = await fetch("/api/diagnose", {
@@ -360,26 +494,29 @@ export default function TomatoLeafDiseaseDetector() {
             imageUrl: uploadedCdnUrl,
             fileName: fileName || "tomato_leaf.jpg",
             pixelArray,
-            topPredictions: clientTop3,
+            topPredictions: liveOnnxPredictions || clientTop3,
           }),
         });
         if (diagnoseRes.ok) {
           backendResponseData = await diagnoseRes.json();
         }
       } catch (diagErr) {
-        console.warn("Backend diagnose ping notice:", diagErr);
+        console.warn("Backend diagnose ping notice (continuing seamlessly with client ONNX):", diagErr);
       }
 
       const top3 =
-        backendResponseData?.predictions && backendResponseData.predictions.length > 0
+        liveOnnxPredictions ||
+        (backendResponseData?.predictions && backendResponseData.predictions.length > 0
           ? backendResponseData.predictions
-          : clientTop3;
+          : clientTop3);
 
       const defaultBackendMsg =
         "Backend Model Server: Model stub active (awaiting tomato_model.onnx weights). Calibrated for Solanaceae classes.";
 
       const backendMessage =
-        backendResponseData?.backendMessage || defaultBackendMsg;
+        backendResponseData?.backendMessage ||
+        onnxEngineMsg ||
+        defaultBackendMsg;
 
       // 4. Persist scan into Cloud Firestore database
       let persistedId = "local_" + Date.now();
