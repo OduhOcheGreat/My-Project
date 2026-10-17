@@ -36,6 +36,8 @@ import {
   getDocs,
   query,
   limit,
+  orderBy,
+  onSnapshot,
 } from "firebase/firestore";
 import { handleFirestoreError, OperationType } from "./utils/firestoreErrors";
 import "./styles/TomatoScan.css";
@@ -109,16 +111,30 @@ async function getClientOnnxSession() {
 
   clientSessionPromise = (async () => {
     try {
-      console.log("Pre-loading client-side ONNX session from UploadThing CDN...");
-      const session = await ortWeb.InferenceSession.create(
-        PERMANENT_MODEL_CDN_URL,
-        { executionProviders: ["wasm"] }
-      );
+      const ort = (typeof window !== "undefined" && window.ort) ? window.ort : ortWeb;
+      if (!ort) throw new Error("ONNX Runtime library not found");
+
+      // Configure WASM for single-thread execution to work across all hosts without COOP/COEP headers
+      if (ort.env?.wasm) {
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.simd = true;
+      }
+
+      console.log("Fetching tomato_model.onnx binary from UploadThing CDN...");
+      const res = await fetch(PERMANENT_MODEL_CDN_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status} fetching model from CDN`);
+      const buffer = await res.arrayBuffer();
+
+      console.log(`Instantiating ONNX session with ${buffer.byteLength} bytes...`);
+      const session = await ort.InferenceSession.create(buffer, {
+        executionProviders: ["wasm"],
+      });
       clientSessionInstance = session;
       console.log("Client-side ONNX session ready! Inputs:", session.inputNames);
       return session;
     } catch (err) {
       console.warn("Could not load client-side ONNX session:", err);
+      clientSessionPromise = null;
       return null;
     }
   })();
@@ -251,81 +267,68 @@ export default function TomatoLeafDiseaseDetector() {
         console.warn("Failed to load local cached session:", cacheErr);
       }
 
+      // Pre-warm client ONNX session in the background from CDN buffer
+      getClientOnnxSession();
+
       // 1. Check Backend API status
       await refreshSystemStatus();
 
-      // 2. Load recent scans from Firestore
+      // 2. Real-time Live Shared Sync from Cloud Firestore (User & Partner see each other's scans instantly!)
       try {
         const scansCol = collection(db, "scans");
-        const q = query(scansCol, limit(8));
-        const snapshot = await getDocs(q);
-        const docs = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        }));
-        if (docs.length > 0) {
-          const formatted = docs.map((d) => ({
-            id: d.id,
-            name: d.fileName,
-            thumb: d.imageUrl,
-            top1: {
-              label: d.topPrediction,
-              confidence: d.confidence || 90,
-              advice: d.advice || "",
-              swatch:
-                CLASSES.find((c) => c.label === d.topPrediction)?.swatch ||
-                "#3E7C4A",
-            },
-            backendMessage: d.backendMessage,
-            imageUrl: d.imageUrl,
-          }));
-
-          setHistory(formatted);
-
-          // If no active session cached, restore latest scan from Firestore automatically
-          const cached = localStorage.getItem("tomatoscan_active_session");
-          if (!cached && formatted[0]) {
-            const latest = formatted[0];
-            setImageSrc(latest.imageUrl || latest.thumb);
-            setFileName(latest.name);
-            setResult([latest.top1]);
-            setBackendMeta({
-              cdnUrl: latest.imageUrl,
-              backendMessage:
-                latest.backendMessage ||
-                "Restored previous scan from Cloud Firestore.",
-              databaseId: latest.id,
-              timestamp: "Restored from Database",
-            });
-          }
-        }
-      } catch (err) {
-        // Fallback: load from backend in-memory registry
-        try {
-          const res = await fetch("/api/scans");
-          const data = await res.json();
-          if (Array.isArray(data.scans) && data.scans.length > 0) {
-            setHistory(
-              data.scans.map((d) => ({
+        const q = query(scansCol, orderBy("createdAt", "desc"), limit(20));
+        const unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            const docs = snapshot.docs.map((docSnap) => ({
+              id: docSnap.id,
+              ...docSnap.data(),
+            }));
+            if (docs.length > 0) {
+              const formatted = docs.map((d) => ({
                 id: d.id,
                 name: d.fileName,
                 thumb: d.imageUrl,
                 top1: {
                   label: d.topPrediction,
-                  confidence: d.confidence,
-                  advice: d.advice,
+                  confidence: d.confidence || 90,
+                  advice: d.advice || "",
                   swatch:
                     CLASSES.find((c) => c.label === d.topPrediction)?.swatch ||
+                    SWATCH_LOOKUP[d.topPrediction] ||
                     "#3E7C4A",
                 },
                 backendMessage: d.backendMessage,
                 imageUrl: d.imageUrl,
-              }))
-            );
+                createdAt: d.createdAt,
+              }));
+
+              setHistory(formatted);
+
+              // If no local session yet, restore latest shared scan
+              const cached = localStorage.getItem("tomatoscan_active_session");
+              if (!cached && formatted[0]) {
+                const latest = formatted[0];
+                setImageSrc(latest.imageUrl || latest.thumb);
+                setFileName(latest.name);
+                setResult([latest.top1]);
+                setBackendMeta({
+                  cdnUrl: latest.imageUrl,
+                  backendMessage:
+                    latest.backendMessage ||
+                    "Live shared scan retrieved from Cloud Firestore.",
+                  databaseId: latest.id,
+                  timestamp: "Shared Team Scan",
+                });
+              }
+            }
+          },
+          (err) => {
+            console.warn("Firestore live sync notice:", err);
           }
-        } catch {
-          // Ignore fallback error
-        }
+        );
+      } catch (err) {
+        console.warn("Firestore query error:", err);
       }
     }
 
@@ -518,12 +521,37 @@ export default function TomatoLeafDiseaseDetector() {
         onnxEngineMsg ||
         defaultBackendMsg;
 
-      // 4. Persist scan into Cloud Firestore database
+      // Ensure image URL is safe for Firestore sync (either CDN URL or lightweight 400px thumbnail)
+      let firestoreImageUrl = uploadedCdnUrl;
+      if (!firestoreImageUrl?.startsWith("http") && imgRef.current) {
+        try {
+          const thumbCanvas = document.createElement("canvas");
+          const maxDim = 400;
+          let w = imgRef.current.naturalWidth || 400;
+          let h = imgRef.current.naturalHeight || 400;
+          if (w > h && w > maxDim) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else if (h > maxDim) {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+          thumbCanvas.width = w;
+          thumbCanvas.height = h;
+          const thumbCtx = thumbCanvas.getContext("2d");
+          thumbCtx.drawImage(imgRef.current, 0, 0, w, h);
+          firestoreImageUrl = thumbCanvas.toDataURL("image/jpeg", 0.65);
+        } catch (cErr) {
+          console.warn("Thumbnail generation notice:", cErr);
+        }
+      }
+
+      // 4. Persist scan into Cloud Firestore database (triggers instant real-time sync to partner!)
       let persistedId = "local_" + Date.now();
       try {
         const docRef = await addDoc(collection(db, "scans"), {
           fileName: fileName || "leaf-photo.jpg",
-          imageUrl: uploadedCdnUrl,
+          imageUrl: firestoreImageUrl,
           topPrediction: top3[0].label,
           confidence: Number(top3[0].confidence.toFixed(1)),
           advice: top3[0].advice || "",
