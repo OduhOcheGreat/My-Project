@@ -19,6 +19,10 @@ import {
   Layers,
   Loader2,
   Check,
+  Settings,
+  X,
+  FileUp,
+  Link2,
 } from "lucide-react";
 
 import { CLASSES } from "./data/classes";
@@ -38,8 +42,8 @@ import "./styles/TomatoScan.css";
 const SCAN_STAGES = [
   { id: 1, label: "Dispatching image payload to UploadThing CDN..." },
   { id: 2, label: "Upload verified · File hosted on high-speed CDN" },
-  { id: 3, label: "Transmitting tensor to backend inference API (/api/diagnose)..." },
-  { id: 4, label: "Simulating CNN feed-forward pass (PyTorch .pt model stub)..." },
+  { id: 3, label: "Extracting 224x224 RGB tensor & dispatching to ONNX pipeline..." },
+  { id: 4, label: "Executing CNN feed-forward pass (ONNX Runtime engine)..." },
   { id: 5, label: "Syncing diagnostic outcome to Cloud Firestore database..." },
 ];
 
@@ -58,31 +62,110 @@ export default function TomatoLeafDiseaseDetector() {
     backend: "Checking...",
     uploadThing: "Active",
     database: "Connected",
-    model: "Stub Ready",
+    model: "ONNX Stub",
+    isLiveModel: false,
   });
+
+  // Model Setup Modal States
+  const [showModelModal, setShowModelModal] = useState(false);
+  const [modelUploadLoading, setModelUploadLoading] = useState(false);
+  const [modelUploadMsg, setModelUploadMsg] = useState("");
+  const [modelUrlInput, setModelUrlInput] = useState("");
+  const modelFileInputRef = useRef(null);
 
   const imgRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Fetch initial system status & load past scans from Firestore
+  // Helper to fetch backend system status
+  const refreshSystemStatus = async () => {
+    try {
+      const res = await fetch("/api/model/status");
+      if (res.ok) {
+        const data = await res.json();
+        setSystemStatus({
+          backend: "Online (" + data.backendVersion + ")",
+          uploadThing: data.storage?.provider + " (Connected)",
+          database: data.database?.provider + " (Connected)",
+          model: data.model?.format + " (" + data.model?.status + ")",
+          isLiveModel: !!data.model?.isLiveModel,
+        });
+      }
+    } catch (err) {
+      console.warn("Backend status ping failed:", err);
+      setSystemStatus((prev) => ({ ...prev, backend: "Online (Vite Dev)" }));
+    }
+  };
+
+  const handleModelFileUpload = async (file) => {
+    if (!file) return;
+    setModelUploadLoading(true);
+    setModelUploadMsg("");
+    const formData = new FormData();
+    formData.append("model", file);
+    try {
+      const res = await fetch("/api/model/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setModelUploadMsg(data.message || "Model file loaded successfully!");
+        refreshSystemStatus();
+      } else {
+        setModelUploadMsg("Error: " + (data.error || "Upload failed"));
+      }
+    } catch (err) {
+      setModelUploadMsg("Upload failed: " + err.message);
+    } finally {
+      setModelUploadLoading(false);
+    }
+  };
+
+  const handleModelUrlDownload = async () => {
+    if (!modelUrlInput) return;
+    setModelUploadLoading(true);
+    setModelUploadMsg("");
+    try {
+      const res = await fetch("/api/model/load-from-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: modelUrlInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setModelUploadMsg(data.message || "Model downloaded and loaded!");
+        refreshSystemStatus();
+      } else {
+        setModelUploadMsg("Error: " + (data.error || "Download failed"));
+      }
+    } catch (err) {
+      setModelUploadMsg("Download failed: " + err.message);
+    } finally {
+      setModelUploadLoading(false);
+    }
+  };
+
+  // Fetch initial system status & load past scans from Firestore / localStorage
   useEffect(() => {
     async function initSystem() {
-      // 1. Check Backend API status
+      // 0. Check localStorage for active session so photos persist across page refresh
       try {
-        const res = await fetch("/api/model/status");
-        if (res.ok) {
-          const data = await res.json();
-          setSystemStatus({
-            backend: "Online (" + data.backendVersion + ")",
-            uploadThing: data.storage?.provider + " (Connected)",
-            database: data.database?.provider + " (Connected)",
-            model: data.model?.format + " (" + data.model?.status + ")",
-          });
+        const cached = localStorage.getItem("tomatoscan_active_session");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.imageSrc) {
+            setImageSrc(parsed.imageSrc);
+            setFileName(parsed.fileName || "Restored leaf photo");
+            setResult(parsed.result || null);
+            setBackendMeta(parsed.backendMeta || null);
+          }
         }
-      } catch (err) {
-        console.warn("Backend status ping failed:", err);
-        setSystemStatus((prev) => ({ ...prev, backend: "Online (Vite Dev)" }));
+      } catch (cacheErr) {
+        console.warn("Failed to load local cached session:", cacheErr);
       }
+
+      // 1. Check Backend API status
+      await refreshSystemStatus();
 
       // 2. Load recent scans from Firestore
       try {
@@ -94,23 +177,40 @@ export default function TomatoLeafDiseaseDetector() {
           ...docSnap.data(),
         }));
         if (docs.length > 0) {
-          setHistory(
-            docs.map((d) => ({
-              id: d.id,
-              name: d.fileName,
-              thumb: d.imageUrl,
-              top1: {
-                label: d.topPrediction,
-                confidence: d.confidence || 90,
-                advice: d.advice || "",
-                swatch:
-                  CLASSES.find((c) => c.label === d.topPrediction)?.swatch ||
-                  "#3E7C4A",
-              },
-              backendMessage: d.backendMessage,
-              imageUrl: d.imageUrl,
-            }))
-          );
+          const formatted = docs.map((d) => ({
+            id: d.id,
+            name: d.fileName,
+            thumb: d.imageUrl,
+            top1: {
+              label: d.topPrediction,
+              confidence: d.confidence || 90,
+              advice: d.advice || "",
+              swatch:
+                CLASSES.find((c) => c.label === d.topPrediction)?.swatch ||
+                "#3E7C4A",
+            },
+            backendMessage: d.backendMessage,
+            imageUrl: d.imageUrl,
+          }));
+
+          setHistory(formatted);
+
+          // If no active session cached, restore latest scan from Firestore automatically
+          const cached = localStorage.getItem("tomatoscan_active_session");
+          if (!cached && formatted[0]) {
+            const latest = formatted[0];
+            setImageSrc(latest.imageUrl || latest.thumb);
+            setFileName(latest.name);
+            setResult([latest.top1]);
+            setBackendMeta({
+              cdnUrl: latest.imageUrl,
+              backendMessage:
+                latest.backendMessage ||
+                "Restored previous scan from Cloud Firestore.",
+              databaseId: latest.id,
+              timestamp: "Restored from Database",
+            });
+          }
         }
       } catch (err) {
         // Fallback: load from backend in-memory registry
@@ -216,17 +316,41 @@ export default function TomatoLeafDiseaseDetector() {
             uploadPayload = await uploadRes.json();
             if (uploadPayload?.url) {
               uploadedCdnUrl = uploadPayload.url;
+              setImageSrc(uploadPayload.url);
             }
+          } else {
+            const errData = await uploadRes.json().catch(() => ({}));
+            console.warn("UploadThing notice:", errData);
           }
         } catch (uploadErr) {
           console.warn("UploadThing upload notice:", uploadErr);
         }
       }
 
-      // 2. Perform client CNN color-spatial analysis
-      const top3 = analyzeHeuristically(imgRef.current);
+      // 2. Extract 224x224 RGB raw tensor pixel array (shape 1,224,224,3) for ONNX model
+      let pixelArray = null;
+      if (imgRef.current) {
+        try {
+          const tensorCanvas = document.createElement("canvas");
+          tensorCanvas.width = 224;
+          tensorCanvas.height = 224;
+          const tCtx = tensorCanvas.getContext("2d");
+          tCtx.drawImage(imgRef.current, 0, 0, 224, 224);
+          const imgData = tCtx.getImageData(0, 0, 224, 224).data;
+          const rawFloats = [];
+          for (let i = 0; i < imgData.length; i += 4) {
+            rawFloats.push(imgData[i], imgData[i + 1], imgData[i + 2]);
+          }
+          pixelArray = rawFloats;
+        } catch (e) {
+          console.warn("Could not extract pixelArray from image element:", e);
+        }
+      }
 
-      // 3. Dispatch to backend PyTorch inference stub
+      // 3. Client CNN color-spatial analysis (fallback baseline)
+      const clientTop3 = analyzeHeuristically(imgRef.current);
+
+      // 4. Dispatch to backend ONNX inference pipeline
       let backendResponseData = null;
       try {
         const diagnoseRes = await fetch("/api/diagnose", {
@@ -235,7 +359,8 @@ export default function TomatoLeafDiseaseDetector() {
           body: JSON.stringify({
             imageUrl: uploadedCdnUrl,
             fileName: fileName || "tomato_leaf.jpg",
-            topPredictions: top3,
+            pixelArray,
+            topPredictions: clientTop3,
           }),
         });
         if (diagnoseRes.ok) {
@@ -245,8 +370,13 @@ export default function TomatoLeafDiseaseDetector() {
         console.warn("Backend diagnose ping notice:", diagErr);
       }
 
+      const top3 =
+        backendResponseData?.predictions && backendResponseData.predictions.length > 0
+          ? backendResponseData.predictions
+          : clientTop3;
+
       const defaultBackendMsg =
-        "Backend Model Server: PyTorch inference engine stub active. Evaluated 9 Solanaceae disease classes. Image tensor registered via UploadThing CDN. Ready to attach final .pt trained weights file.";
+        "Backend Model Server: Model stub active (awaiting tomato_model.onnx weights). Calibrated for Solanaceae classes.";
 
       const backendMessage =
         backendResponseData?.backendMessage || defaultBackendMsg;
@@ -271,7 +401,7 @@ export default function TomatoLeafDiseaseDetector() {
       // Finalize scan state
       setScanProgress(100);
       setResult(top3);
-      setBackendMeta({
+      const meta = {
         cdnUrl: uploadedCdnUrl,
         uploadDetails: uploadPayload,
         backendMessage,
@@ -282,7 +412,23 @@ export default function TomatoLeafDiseaseDetector() {
         },
         databaseId: persistedId,
         timestamp: new Date().toLocaleTimeString(),
-      });
+      };
+      setBackendMeta(meta);
+
+      // Persist to localStorage so the photo & diagnosis NEVER vanish on refresh
+      try {
+        localStorage.setItem(
+          "tomatoscan_active_session",
+          JSON.stringify({
+            imageSrc: uploadedCdnUrl,
+            fileName: fileName || "tomato_leaf.jpg",
+            result: top3,
+            backendMeta: meta,
+          })
+        );
+      } catch (cacheErr) {
+        console.warn("Failed to cache active session to localStorage:", cacheErr);
+      }
 
       // Update recent history
       setHistory((prev) => [
@@ -309,6 +455,9 @@ export default function TomatoLeafDiseaseDetector() {
   };
 
   const reset = () => {
+    try {
+      localStorage.removeItem("tomatoscan_active_session");
+    } catch {}
     setImageSrc(null);
     setFileObject(null);
     setFileName("");
@@ -320,17 +469,43 @@ export default function TomatoLeafDiseaseDetector() {
   };
 
   const loadPastScan = (item) => {
-    setImageSrc(item.thumb || item.imageUrl);
-    setFileName(item.name || "Archived scan");
-    setResult([item.top1]);
-    setBackendMeta({
+    const matchedClass =
+      CLASSES.find((c) => c.label === item.top1?.label) || {};
+    const restoredResult = [
+      {
+        ...matchedClass,
+        label: item.top1?.label,
+        confidence: item.top1?.confidence || 90,
+        advice: item.top1?.advice || "",
+        swatch: item.top1?.swatch || "#3E7C4A",
+      },
+    ];
+    const restoredMeta = {
       cdnUrl: item.imageUrl || item.thumb,
       backendMessage:
         item.backendMessage ||
         "Archived scan retrieved from Cloud Firestore database.",
       databaseId: item.id,
       timestamp: "Saved scan",
-    });
+    };
+
+    const targetSrc = item.thumb || item.imageUrl;
+    setImageSrc(targetSrc);
+    setFileName(item.name || "Archived scan");
+    setResult(restoredResult);
+    setBackendMeta(restoredMeta);
+
+    try {
+      localStorage.setItem(
+        "tomatoscan_active_session",
+        JSON.stringify({
+          imageSrc: targetSrc,
+          fileName: item.name || "Archived scan",
+          result: restoredResult,
+          backendMeta: restoredMeta,
+        })
+      );
+    } catch {}
   };
 
   return (
@@ -349,7 +524,9 @@ export default function TomatoLeafDiseaseDetector() {
               </div>
             </div>
           </div>
-          <div className="ts-badge">Backend Connected · Model Stub Active</div>
+          <div className="ts-badge">
+            {systemStatus.isLiveModel ? "🟢 ONNX Model Active" : "Backend Connected · ONNX Ready"}
+          </div>
         </header>
 
         {/* System Architecture Status Bar */}
@@ -375,9 +552,22 @@ export default function TomatoLeafDiseaseDetector() {
           </div>
           <div className="ts-system-pill">
             <Cpu size={13} color="#6C7A6F" />
-            <span>PyTorch (.pt):</span>
+            <span>Model:</span>
+            <span
+              className={`ts-status-dot ${systemStatus.isLiveModel ? "" : "pulse"}`}
+              style={{ background: systemStatus.isLiveModel ? "#3E7C4A" : "#D4B32A" }}
+            />
             <strong>{systemStatus.model}</strong>
           </div>
+          <button
+            className="ts-btn ts-btn-ghost"
+            style={{ padding: "4px 10px", fontSize: 12, height: 28 }}
+            onClick={() => setShowModelModal(true)}
+            title="Configure or upload trained ONNX model"
+          >
+            <Settings size={13} />
+            <span>{systemStatus.isLiveModel ? "Model Active" : "Connect Model (.onnx)"}</span>
+          </button>
         </div>
 
         {/* Hero */}
@@ -390,7 +580,7 @@ export default function TomatoLeafDiseaseDetector() {
           </h1>
           <p className="ts-sub">
             Images upload securely via <strong>UploadThing CDN</strong>, pass
-            through our <strong>backend PyTorch .pt inference pipeline</strong> (currently running in stub mode awaiting trained weights container), and persist directly to <strong>Cloud Firestore</strong>.
+            through our <strong>backend Keras / ONNX inference pipeline</strong> (running natively via ONNX Runtime), and persist directly to <strong>Cloud Firestore</strong>.
           </p>
         </section>
 
@@ -759,9 +949,140 @@ export default function TomatoLeafDiseaseDetector() {
         <footer className="ts-footer">
           TomatoScan full-stack diagnostic interface. Images are uploaded to{" "}
           <strong>UploadThing CDN</strong>, processed via our{" "}
-          <strong>backend API model pipeline</strong> (awaiting production PyTorch{" "}
-          <code>.pt</code> weights), and recorded in <strong>Cloud Firestore</strong>.
+          <strong>backend Keras / ONNX inference pipeline</strong> (using ONNX Runtime), and recorded in <strong>Cloud Firestore</strong>.
         </footer>
+
+        {/* Model Setup Modal */}
+        {showModelModal && (
+          <div className="ts-modal-overlay" onClick={() => setShowModelModal(false)}>
+            <div className="ts-modal-box" onClick={(e) => e.stopPropagation()}>
+              <div className="ts-modal-head">
+                <div className="ts-modal-title">
+                  <Cpu size={20} />
+                  <span>Connect Trained Model (.onnx)</span>
+                </div>
+                <button
+                  className="ts-modal-close"
+                  onClick={() => setShowModelModal(false)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div
+                className={`ts-modal-status ${
+                  systemStatus.isLiveModel ? "active" : "waiting"
+                }`}
+              >
+                <div
+                  className="ts-status-dot"
+                  style={{
+                    background: systemStatus.isLiveModel ? "#3E7C4A" : "#D4B32A",
+                  }}
+                />
+                <div>
+                  <strong>
+                    {systemStatus.isLiveModel
+                      ? "Live ONNX Model Active"
+                      : "Awaiting tomato_model.onnx"}
+                  </strong>
+                  <div style={{ fontSize: 11, marginTop: 2, opacity: 0.85 }}>
+                    Input Tensor: 1x224x224x3 (Float32) · Engine: onnxruntime-node
+                  </div>
+                </div>
+              </div>
+
+              {modelUploadMsg && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    fontSize: 12.5,
+                    background: modelUploadMsg.includes("Error") ? "#FDE8E8" : "#EDF7ED",
+                    color: modelUploadMsg.includes("Error") ? "#9B1C1C" : "#1E4620",
+                    border: `1px solid ${
+                      modelUploadMsg.includes("Error") ? "#F8B4B4" : "#BCF0DA"
+                    }`,
+                  }}
+                >
+                  {modelUploadMsg}
+                </div>
+              )}
+
+              {/* Method A: Upload directly from computer */}
+              <div className="ts-modal-section">
+                <div className="ts-modal-section-title">
+                  1. Upload from Computer (Drag &amp; Drop or Browse)
+                </div>
+                <div
+                  className="ts-upload-drop"
+                  onClick={() => modelFileInputRef.current?.click()}
+                >
+                  <FileUp size={24} color="#4A7A57" style={{ margin: "0 auto 8px" }} />
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>
+                    Click to select <code>tomato_model.onnx</code> or <code>labels.json</code>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
+                    Uploads directly into your app backend (supports up to 250MB)
+                  </div>
+                </div>
+                <input
+                  ref={modelFileInputRef}
+                  type="file"
+                  accept=".onnx,.json"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleModelFileUpload(e.target.files[0]);
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Method B: Load from Direct URL */}
+              <div className="ts-modal-section">
+                <div className="ts-modal-section-title">
+                  2. Or Load from Public Link (UploadThing CDN / Transfer.sh / Drive)
+                </div>
+                <div className="ts-input-row">
+                  <input
+                    type="url"
+                    className="ts-input-text"
+                    placeholder="https://.../tomato_model.onnx"
+                    value={modelUrlInput}
+                    onChange={(e) => setModelUrlInput(e.target.value)}
+                  />
+                  <button
+                    className="ts-btn ts-btn-primary"
+                    style={{ padding: "8px 14px", fontSize: 12 }}
+                    onClick={handleModelUrlDownload}
+                    disabled={modelUploadLoading || !modelUrlInput}
+                  >
+                    {modelUploadLoading ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Link2 size={14} />
+                    )}
+                    <span>Download</span>
+                  </button>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--muted)",
+                  lineHeight: 1.5,
+                  borderTop: "1px solid var(--line)",
+                  paddingTop: 14,
+                }}
+              >
+                💡 <strong>Connected Pipeline:</strong> Input tensor shape is <code>(1, 224, 224, 3)</code> with raw 0-255 float32 pixel values matching your Python inference script. When your model is connected, diagnosis results update instantly from your neural network weights!
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -3,8 +3,10 @@ import { createServer as createViteServer } from "vite";
 import multer from "multer";
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { UTApi } from "uploadthing/server";
+import * as ort from "onnxruntime-node";
 
 dotenv.config();
 
@@ -16,20 +18,29 @@ const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === "production";
 
 // Middleware
-app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Configure UploadThing UTApi
-const uploadThingToken =
-  process.env.UPLOADTHING_TOKEN ||
-  "eyJhcGlLZXkiOiJza19saXZlX2RjYjg1OGY1OTUyOWJlNTMzNTI1Y2VkYzRiMzcxMjNjZWZhZWJkNjA1YjQ4YjBmYjI0NmE5ZWRmNmMxMTcxYzYiLCJhcHBJZCI6ImdocHQyeGlmNnkiLCJyZWdpb25zIjpbInNlYTEiXX0=";
+// Sanitize UploadThing token (strip potential redundant env prefixes or quotes)
+function sanitizeToken(raw?: string): string {
+  const fallback =
+    "eyJhcGlLZXkiOiJza19saXZlX2RjYjg1OGY1OTUyOWJlNTMzNTI1Y2VkYzRiMzcxMjNjZWZhZWJkNjA1YjQ4YjBmYjI0NmE5ZWRmNmMxMTcxYzYiLCJhcHBJZCI6ImdocHQyeGlmNnkiLCJyZWdpb25zIjpbInNlYTEiXX0=";
+  if (!raw) return fallback;
+  let token = raw.trim();
+  if (token.includes("UPLOADTHING_TOKEN=")) {
+    token = token.replace(/UPLOADTHING_TOKEN\s*=\s*/g, "");
+  }
+  token = token.replace(/^['"]+|['"]+$/g, "").trim();
+  return token.length > 20 ? token : fallback;
+}
 
+const uploadThingToken = sanitizeToken(process.env.UPLOADTHING_TOKEN);
 const utapi = new UTApi({ token: uploadThingToken });
 
-// Configure Multer for in-memory file uploads
+// Image upload multer
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 12 * 1024 * 1024 }, // 12MB limit
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
@@ -38,6 +49,78 @@ const upload = multer({
     }
   },
 });
+
+// Model file upload multer (up to 250MB for ONNX model)
+const modelsDir = path.resolve(__dirname, "models");
+if (!fs.existsSync(modelsDir)) {
+  fs.mkdirSync(modelsDir, { recursive: true });
+}
+
+const modelDiskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, modelsDir);
+  },
+  filename: (_req, file, cb) => {
+    if (file.originalname.endsWith(".json")) {
+      cb(null, "labels.json");
+    } else {
+      cb(null, "tomato_model.onnx");
+    }
+  },
+});
+const uploadModel = multer({
+  storage: modelDiskStorage,
+  limits: { fileSize: 250 * 1024 * 1024 }, // 250MB
+});
+
+// ONNX Model Session Management
+let onnxSession: ort.InferenceSession | null = null;
+let modelInputName: string = "keras_tensor_525";
+let modelLabels: string[] = [
+  "Bacterial Spot",
+  "Early Blight",
+  "Healthy",
+  "Late Blight",
+  "Leaf Mold",
+  "Septoria Leaf Spot",
+  "Spider Mites",
+  "Target Spot",
+  "Tomato Yellow Leaf Curl Virus",
+];
+
+// Load labels if labels.json exists
+function loadLabels() {
+  const labelsPath = path.join(modelsDir, "labels.json");
+  if (fs.existsSync(labelsPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(labelsPath, "utf-8"));
+      if (Array.isArray(data)) {
+        modelLabels = data;
+        console.log("Loaded custom labels.json:", modelLabels);
+      }
+    } catch (err) {
+      console.warn("Could not parse labels.json:", err);
+    }
+  }
+}
+loadLabels();
+
+async function initOnnxSession() {
+  const modelPath = path.join(modelsDir, "tomato_model.onnx");
+  if (fs.existsSync(modelPath)) {
+    try {
+      console.log("Found tomato_model.onnx, initializing ONNX Runtime session...");
+      onnxSession = await ort.InferenceSession.create(modelPath);
+      modelInputName = onnxSession.inputNames[0] || "keras_tensor_525";
+      console.log(`ONNX session loaded! Inputs: ${onnxSession.inputNames.join(", ")}, Outputs: ${onnxSession.outputNames.join(", ")}`);
+    } catch (err: any) {
+      console.error("Failed to load ONNX model:", err?.message || err);
+    }
+  } else {
+    console.log("No tomato_model.onnx found yet in /models. Awaiting user upload.");
+  }
+}
+initOnnxSession();
 
 // In-memory backend scan registry for fast API access
 const inMemoryScans: Array<{
@@ -53,18 +136,20 @@ const inMemoryScans: Array<{
 
 // API Route: Backend & Model Status
 app.get("/api/model/status", (_req: Request, res: Response) => {
+  const modelExists = fs.existsSync(path.join(modelsDir, "tomato_model.onnx"));
   res.json({
     status: "online",
-    backendVersion: "v0.2.0-beta",
+    backendVersion: "v0.3.0-onnx",
     model: {
-      name: "TomatoLeafCNN-PyTorch",
-      format: "PyTorch (.pt)",
-      targetArchitecture: "ResNet-50 / EfficientNet-B0 Solanaceae Classifier",
-      status: "stubbed_ready_for_weights",
-      classesCount: 9,
-      inputShape: [3, 224, 224],
-      device: "CPU / PyTorch Inference Worker",
-      weightsPlaceholder: "/models/tomato_leaf_cnn.pt",
+      name: "TomatoLeafCNN-ONNX",
+      format: "Keras 3 / ONNX (.onnx)",
+      status: onnxSession ? "live_weights_loaded" : modelExists ? "file_present_initializing" : "awaiting_model_file",
+      isLiveModel: !!onnxSession,
+      inputName: modelInputName,
+      inputShape: [1, 224, 224, 3],
+      labelsCount: modelLabels.length,
+      labels: modelLabels,
+      filePath: "/models/tomato_model.onnx",
     },
     storage: {
       provider: "UploadThing",
@@ -86,7 +171,6 @@ app.post("/api/upload", upload.single("image"), async (req: Request, res: Respon
     }
 
     const { buffer, originalname, mimetype } = req.file;
-    // Construct standard web File object supported in Node 22
     const file = new File([buffer], originalname, { type: mimetype });
 
     const uploadResponse = await utapi.uploadFiles(file);
@@ -117,29 +201,195 @@ app.post("/api/upload", upload.single("image"), async (req: Request, res: Respon
   }
 });
 
-// API Route: Diagnose / PyTorch model stub inference endpoint
-app.post("/api/diagnose", async (req: Request, res: Response) => {
+// API Route: Upload Model File (.onnx or labels.json) directly from browser
+app.post("/api/model/upload", uploadModel.single("model"), async (req: Request, res: Response) => {
   try {
-    const { imageUrl, fileName, topPredictions, metadata } = req.body;
-
-    if (!imageUrl) {
-      return res.status(400).json({ error: "Missing required parameter 'imageUrl'." });
+    if (!req.file) {
+      return res.status(400).json({ error: "No model or label file provided." });
     }
 
-    const top = Array.isArray(topPredictions) && topPredictions.length > 0 ? topPredictions[0] : null;
-    const topLabel = top?.label || "Tomato Disease Scan";
-    const confidence = typeof top?.confidence === "number" ? top.confidence : 92.4;
-    const advice = top?.advice || "Keep monitoring crop foliage regularly.";
+    if (req.file.originalname.endsWith(".json")) {
+      loadLabels();
+      return res.json({
+        success: true,
+        message: "labels.json uploaded and applied successfully!",
+        labels: modelLabels,
+      });
+    }
 
-    const backendMessage = `Backend Model Engine (PyTorch .pt inference pipeline): Image tensor normalized and passed through CNN model graph. Awaiting production .pt weights file (tomato_leaf_cnn.pt). Simulated output calibrated for 9 Solanaceae disease classes with ${confidence.toFixed(1)}% prediction confidence.`;
+    // If ONNX file was uploaded:
+    await initOnnxSession();
+
+    return res.json({
+      success: true,
+      message: "tomato_model.onnx uploaded and loaded into ONNX Runtime session!",
+      isLiveModel: !!onnxSession,
+      inputName: modelInputName,
+      inputs: onnxSession ? onnxSession.inputNames : [],
+      outputs: onnxSession ? onnxSession.outputNames : [],
+    });
+  } catch (err: any) {
+    console.error("Model upload error:", err);
+    return res.status(500).json({ error: "Failed to load model file: " + (err?.message || err) });
+  }
+});
+
+// API Route: Download and load model from public URL (UploadThing, Drive, transfer.sh, etc.)
+app.post("/api/model/load-from-url", async (req: Request, res: Response) => {
+  try {
+    const { url, isLabels } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: "Missing required 'url' parameter." });
+    }
+
+    const targetFile = isLabels ? "labels.json" : "tomato_model.onnx";
+    const destPath = path.join(modelsDir, targetFile);
+
+    console.log(`Downloading ${targetFile} from ${url}...`);
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      return res.status(502).json({ error: `Failed to fetch file from URL: HTTP ${resp.status}` });
+    }
+
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(destPath, buffer);
+
+    if (isLabels) {
+      loadLabels();
+      return res.json({ success: true, message: "labels.json downloaded and loaded!", labels: modelLabels });
+    }
+
+    await initOnnxSession();
+    return res.json({
+      success: true,
+      message: "tomato_model.onnx downloaded and loaded into ONNX Runtime session!",
+      isLiveModel: !!onnxSession,
+      inputs: onnxSession ? onnxSession.inputNames : [],
+      outputs: onnxSession ? onnxSession.outputNames : [],
+    });
+  } catch (err: any) {
+    console.error("URL model download error:", err);
+    return res.status(500).json({ error: "Download failed: " + (err?.message || err) });
+  }
+});
+
+// API Route: Set labels array directly via JSON
+app.post("/api/model/labels", (req: Request, res: Response) => {
+  const { labels } = req.body;
+  if (Array.isArray(labels) && labels.length > 0) {
+    modelLabels = labels;
+    fs.writeFileSync(path.join(modelsDir, "labels.json"), JSON.stringify(labels, null, 2));
+    return res.json({ success: true, labels: modelLabels });
+  }
+  return res.status(400).json({ error: "Labels must be an array of strings." });
+});
+
+// Helper to format model labels into human-friendly strings
+function formatLabelName(raw: string): string {
+  if (!raw) return "Unknown";
+  let name = raw.replace(/_/g, " ").trim();
+  if (name.toLowerCase() === "healthy") return "Healthy";
+  if (name.toLowerCase() === "powdery mildew") return "Powdery Mildew";
+  if (name.toLowerCase() === "tomato mosaic virus") return "Tomato Mosaic Virus";
+  if (name.toLowerCase().includes("spider mites")) return "Spider Mites";
+  return name.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
+
+// Advice lookup dictionary by label
+const ADVICE_LOOKUP: Record<string, string> = {
+  "Healthy": "No signs of infection detected. Keep monitoring weekly and maintain current watering and spacing practices.",
+  "Early Blight": "Remove and destroy affected lower leaves. Apply a copper-based or chlorothalonil fungicide and improve air circulation.",
+  "Late Blight": "Act fast — late blight spreads rapidly in humid conditions. Isolate affected plants and apply systemic fungicide.",
+  "Septoria Leaf Spot": "Prune infected foliage close to soil line, mulch to prevent soil splash, and rotate fungicide classes.",
+  "Tomato Yellow Leaf Curl Virus": "Control the whitefly vector using insecticidal soap or sticky traps. Remove severely stunted plants.",
+  "Bacterial Spot": "Switch to copper-based bactericide sprays, avoid working with wet foliage, and sterilize tools between plants.",
+  "Leaf Mold": "Lower humidity around the canopy with wider plant spacing and proper ventilation. Apply protectant fungicide.",
+  "Spider Mites": "Rinse the underside of foliage with strong water spray and introduce predatory mites or insecticidal soap.",
+  "Target Spot": "Remove concentric-ringed leaves promptly, avoid dense planting, and apply broad-spectrum fungicide.",
+  "Tomato Mosaic Virus": "Disinfect hands and pruning shears with a milk or bleach solution. Destroy infected plants immediately to prevent sap transmission.",
+  "Powdery Mildew": "Apply sulfur-based or biofungicide sprays at first appearance of white fungal powder. Ensure ample sunlight and adequate air circulation.",
+};
+
+const SWATCH_LOOKUP: Record<string, string> = {
+  "Healthy": "#3E7C4A",
+  "Early Blight": "#A8631B",
+  "Late Blight": "#3B2A2A",
+  "Septoria Leaf Spot": "#8C8C7A",
+  "Tomato Yellow Leaf Curl Virus": "#D4B32A",
+  "Bacterial Spot": "#B24A34",
+  "Leaf Mold": "#C9A227",
+  "Spider Mites": "#9C7A3C",
+  "Target Spot": "#7A4A2A",
+  "Tomato Mosaic Virus": "#8B263E",
+  "Powdery Mildew": "#BFB88A",
+};
+
+// API Route: Diagnose endpoint (executes live ONNX model if loaded, or fallback stub)
+app.post("/api/diagnose", async (req: Request, res: Response) => {
+  try {
+    const { imageUrl, fileName, pixelArray, topPredictions } = req.body;
+
+    if (!imageUrl && !pixelArray) {
+      return res.status(400).json({ error: "Missing required parameter 'imageUrl' or 'pixelArray'." });
+    }
+
+    let finalPredictions = topPredictions || [];
+    let isLiveInference = false;
+    let inferenceDetails = "";
+
+    // If ONNX session is active and client provided the normalized pixel array (224x224x3):
+    if (onnxSession && Array.isArray(pixelArray) && pixelArray.length === 224 * 224 * 3) {
+      try {
+        const floatData = new Float32Array(pixelArray);
+        const tensor = new ort.Tensor("float32", floatData, [1, 224, 224, 3]);
+        const inputKey = onnxSession.inputNames[0] || modelInputName;
+        const results = await onnxSession.run({ [inputKey]: tensor });
+        const outputKey = onnxSession.outputNames[0];
+        const outputTensor = results[outputKey];
+        const rawScores = Array.from(outputTensor.data as Float32Array);
+
+        // Apply softmax if raw logits
+        const maxVal = Math.max(...rawScores);
+        const expScores = rawScores.map((v) => Math.exp(v - maxVal));
+        const sumExp = expScores.reduce((a, b) => a + b, 0);
+        const probs = expScores.map((v) => v / sumExp);
+
+        // Map to labels
+        const ranked = probs
+          .map((prob, idx) => {
+            const rawLabel = modelLabels[idx] || `Class_${idx}`;
+            const formattedLabel = formatLabelName(rawLabel);
+            return {
+              id: rawLabel.toLowerCase().replace(/\s+/g, "_"),
+              label: formattedLabel,
+              confidence: Number((prob * 100).toFixed(1)),
+              advice: ADVICE_LOOKUP[formattedLabel] || ADVICE_LOOKUP[rawLabel] || "Monitor crop foliage regularly.",
+              swatch: SWATCH_LOOKUP[formattedLabel] || SWATCH_LOOKUP[rawLabel] || "#4A7A57",
+            };
+          })
+          .sort((a, b) => b.confidence - a.confidence);
+
+        finalPredictions = ranked.slice(0, 3);
+        isLiveInference = true;
+        inferenceDetails = `Live ONNX Runtime inference executed successfully with trained weights (tensor: ${inputKey}, shape: 1x224x224x3).`;
+      } catch (onnxErr: any) {
+        console.error("ONNX inference failed, falling back to heuristic:", onnxErr);
+        inferenceDetails = `ONNX evaluation note: ${onnxErr?.message || onnxErr}`;
+      }
+    }
+
+    const top = finalPredictions[0] || { label: "Healthy", confidence: 92.4, advice: "" };
+    const backendMessage = isLiveInference
+      ? `LIVE ONNX MODEL INFERENCE: Evaluated leaf tensor via 'tomato_model.onnx'. Primary diagnosis: ${top.label} (${top.confidence.toFixed(1)}% confidence). ${inferenceDetails}`
+      : `Backend Model Server: Model stub active (awaiting tomato_model.onnx weights). Calibrated for ${modelLabels.length} Solanaceae classes with ${top.confidence?.toFixed(1) || 90}% predicted confidence.`;
 
     const scanRecord = {
       id: "scan_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
       fileName: fileName || "leaf-photo.jpg",
-      imageUrl,
-      topPrediction: topLabel,
-      confidence,
-      advice,
+      imageUrl: imageUrl || "",
+      topPrediction: top.label,
+      confidence: top.confidence,
+      advice: top.advice || ADVICE_LOOKUP[top.label] || "Maintain current watering and spacing.",
       backendMessage,
       createdAt: new Date().toISOString(),
     };
@@ -152,11 +402,12 @@ app.post("/api/diagnose", async (req: Request, res: Response) => {
     return res.json({
       success: true,
       scan: scanRecord,
+      predictions: finalPredictions,
+      isLiveInference,
       model: {
-        architecture: "TomatoLeafCNN (ResNet-50 Solanaceae)",
-        status: "model_stub_active",
-        awaitingWeightsFile: "tomato_leaf_cnn.pt",
-        backendResponseTimeMs: Math.floor(25 + Math.random() * 35),
+        architecture: "TomatoLeafCNN (Keras / ONNX)",
+        status: isLiveInference ? "live_onnx_active" : "stub_active",
+        modelFile: isLiveInference ? "tomato_model.onnx" : "awaiting_upload",
       },
       backendMessage,
     });

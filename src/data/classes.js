@@ -77,6 +77,22 @@ export const CLASSES = [
     advice:
       "Remove concentric-ringed leaves promptly, avoid dense planting, and apply a broad-spectrum fungicide on a 7–10 day cycle.",
   },
+  {
+    id: "tomato_mosaic_virus",
+    label: "Tomato Mosaic Virus",
+    swatch: "#8B263E",
+    hueGroup: "dark",
+    advice:
+      "Disinfect hands and pruning shears with a milk or bleach solution. Destroy infected plants immediately to prevent sap transmission.",
+  },
+  {
+    id: "powdery_mildew",
+    label: "Powdery Mildew",
+    swatch: "#BFB88A",
+    hueGroup: "grey",
+    advice:
+      "Apply sulfur-based or biofungicide sprays at first appearance of white fungal powder. Ensure ample sunlight and adequate air circulation.",
+  },
 ];
 
 export const HUE_GROUP_ORDER = [
